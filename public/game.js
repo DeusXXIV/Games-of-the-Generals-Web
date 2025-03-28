@@ -9,12 +9,11 @@ const cellSize = 80;  // Each square is 80x80 pixels
 // Global game state variables
 let gamePhase = "setup";  // "setup" phase for rearrangements; "play" phase for normal moves
 let localReady = false;
-let opponentReady = false;
-let countdownText; // For displaying countdown
+let opponentReady = false;  // Now the countdown starts solely from the server signal.
+let countdownText; // For displaying the countdown
 let countdownTimer;
 
 // Define piece orders for each player (21 pieces per side)
-// These labels can be updated later with your final art/asset names.
 const piecesOrder = [
   "5*G", "4*G", "3*G", "2*G", "1*G", 
   "COL", "LtCol", "MAJ", "CPT", "1LT", "2LT", "SGT",
@@ -71,7 +70,7 @@ const config = {
   width: boardCols * cellSize,
   height: boardRows * cellSize,
   backgroundColor: 0x2d2d2d,
-  parent: "gameContainer", // The ID of the container div in index.html
+  parent: "gameContainer", // Make sure index.html has a div with id "gameContainer"
   scene: {
     preload: preload,
     create: create,
@@ -81,12 +80,12 @@ const config = {
 
 const game = new Phaser.Game(config);
 
-// Global board state (will mirror initialBoardLayout)
+// Global board state (mirrors initialBoardLayout)
 let board = [];
 
-// Preload assets (none needed yet)
+// Preload assets (none needed here)
 function preload() {
-  // Nothing to preload since we're rendering text
+  // No assets to load since we're using text objects.
 }
 
 // Create the game scene
@@ -150,20 +149,19 @@ function create() {
     }
   });
   
-  // Listen for opponent ready event from the server
-  socket.on("ready", function(data) {
-    opponentReady = data.ready;
-    checkBothReady(scene);
+  // Listen for the synchronized start countdown event from the server.
+  socket.on("startCountdown", function(data) {
+    console.log("Received startCountdown event with data:", data);
+    startCountdown(data.startTime);
   });
   
-  // Listen for moves from other clients (multiplayer)
+  // Listen for moves from other clients (for multiplayer)
   socket.on("move", function(data) {
     console.log("Received move from server:", data);
     processMove(scene, data.fromRow, data.fromCol, data.toRow, data.toCol, false);
   });
   
   // Set up the HTML ready button behavior.
-  // The button is defined in index.html with id "readyButton".
   const readyButton = document.getElementById("readyButton");
   readyButton.addEventListener("click", function() {
     if (gamePhase === "setup" && !localReady) {
@@ -171,51 +169,13 @@ function create() {
       readyButton.textContent = "Waiting...";
       readyButton.classList.add("waiting");
       socket.emit("ready", { ready: true });
-      checkBothReady(scene);
+      // The countdown will now be started by the server.
     }
   });
 }
 
-// Check if both players are ready; if so, start the countdown.
-function checkBothReady(scene) {
-  if (localReady && opponentReady) {
-    startCountdown(scene, 5); // Start a 5-second countdown.
-  }
-}
-
-// Start a countdown before transitioning to the play phase.
-function startCountdown(scene, seconds) {
-  let counter = seconds;
-  if (countdownText) countdownText.destroy();
-  countdownText = scene.add.text(
-    config.width / 2,
-    config.height / 2,
-    `Game starts in: ${counter}`,
-    { font: "32px Arial", fill: "#ffffff" }
-  ).setOrigin(0.5);
-  
-  countdownTimer = scene.time.addEvent({
-    delay: 1000,
-    callback: () => {
-      counter--;
-      if (counter > 0) {
-        countdownText.setText(`Game starts in: ${counter}`);
-      } else {
-        countdownText.setText("Go!");
-        gamePhase = "play";
-        // Remove the countdown text after a moment.
-        scene.time.addEvent({
-          delay: 1000,
-          callback: () => { countdownText.destroy(); }
-        });
-      }
-    },
-    repeat: seconds - 1
-  });
-}
-
 // During setup, allow rearrangements in friendly territory only.
-// For this MVP, assume local (White) pieces are in rows 5–7.
+// For this prototype, assume local (White) pieces are in rows 5–7.
 let selectedPiece = null;
 function handleSetupClick(scene, row, col) {
   if (!isFriendly(row)) return;
@@ -258,10 +218,9 @@ function processMove(scene, fromRow, fromCol, toRow, toCol, broadcast) {
     return;
   }
   
-  // If destination is occupied by an enemy, handle challenge (placeholder logic)
+  // If destination is occupied by an enemy, handle challenge (placeholder logic).
   if (board[toRow][toCol]) {
     if (isEnemy(fromRow, toRow)) {
-      // For now, simply remove enemy piece and move our piece.
       removePiece(scene, toRow, toCol);
       movePiece(scene, fromRow, fromCol, toRow, toCol);
     } else {
@@ -308,12 +267,44 @@ function removePiece(scene, row, col) {
   }
 }
 
-// Determine if two rows belong to opposing sides.
+// For play phase, enemy pieces are on the opposite side.
 function isEnemy(fromRow, toRow) {
   return (isFriendly(fromRow) && !isFriendly(toRow)) ||
          (!isFriendly(fromRow) && isFriendly(toRow));
 }
 
+// Start the synchronized countdown using the server-provided start time.
+function startCountdown(serverStartTime) {
+  const scene = game.scene.scenes[0]; // Get the primary scene.
+  let counter = Math.ceil((serverStartTime - Date.now()) / 1000);
+  if (countdownText) countdownText.destroy();
+  countdownText = scene.add.text(
+    config.width / 2,
+    config.height / 2,
+    `Game starts in: ${counter}`,
+    { font: "32px Arial", fill: "#ffffff" }
+  ).setOrigin(0.5);
+  
+  countdownTimer = scene.time.addEvent({
+    delay: 1000,
+    callback: () => {
+      let remaining = Math.ceil((serverStartTime - Date.now()) / 1000);
+      if (remaining > 0) {
+        countdownText.setText(`Game starts in: ${remaining}`);
+      } else {
+        countdownText.setText("Go!");
+        gamePhase = "play";
+        scene.time.addEvent({
+          delay: 1000,
+          callback: () => { countdownText.destroy(); }
+        });
+        countdownTimer.remove();
+      }
+    },
+    loop: true
+  });
+}
+
 function update() {
-  // Place for additional game logic updates, if needed.
+  // Additional game logic updates can go here.
 }

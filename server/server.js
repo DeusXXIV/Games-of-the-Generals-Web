@@ -3,20 +3,29 @@ const app = express();
 const http = require('http').createServer(app);
 const io = require('socket.io')(http);
 
-// Serve static files from the public directory
+// Track which players are ready.
+let readyStates = {};
+
 app.use(express.static('public'));
 
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
-  // Listen for ready events from clients
+  // Listen for ready events from clients.
   socket.on('ready', (data) => {
     console.log(`Player ${socket.id} is ready:`, data);
-    // Broadcast ready event to all other connected clients
-    socket.broadcast.emit('ready', data);
+    readyStates[socket.id] = true;
+
+    // For this prototype, if 2 players are connected and ready, start the countdown.
+    const connectedPlayers = Object.keys(readyStates);
+    if (connectedPlayers.length >= 2 && connectedPlayers.every(id => readyStates[id] === true)) {
+      // Calculate a start time 5 seconds from now.
+      const startTime = Date.now() + 5000;
+      io.emit('startCountdown', { startTime: startTime });
+      console.log("Both players ready. Starting synchronized countdown.");
+    }
   });
 
-  // Listen for move events
   socket.on('move', (data) => {
     console.log('Received move:', data);
     socket.broadcast.emit('move', data);
@@ -24,6 +33,8 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
+    // Remove the player's ready state
+    delete readyStates[socket.id];
   });
 });
 
